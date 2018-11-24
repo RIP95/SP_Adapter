@@ -70,10 +70,10 @@ __ALIGN_BEGIN static uint8_t rx_buffer[2] __ALIGN_END;
 #define Y_AXIS_HIGH_VADDR	0x1004
 
 __ALIGN_BEGIN uint16_t VirtAddVarTab[NB_OF_VAR] __ALIGN_END = {
-		X_AXIS_LOW_VADDR, X_AXIS_HIGH_VADDR, Y_AXIS_LOW_VADDR, Y_AXIS_HIGH_VADDR };
+	X_AXIS_LOW_VADDR, X_AXIS_HIGH_VADDR, Y_AXIS_LOW_VADDR, Y_AXIS_HIGH_VADDR
+};
 
-struct __packed
-{
+struct __packed {
 	uint8_t		id;			// 0x01
 	uint8_t		buttons;	// red + black
 	uint8_t		gears;		// 1-7 (reverse)
@@ -135,377 +135,319 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef * hadc);
 
 /* USER CODE END 0 */
 
-int main(void)
-{
+int main(void) {
 
-  /* USER CODE BEGIN 1 */
-  /* USER CODE END 1 */
+	/* USER CODE BEGIN 1 */
+	/* USER CODE END 1 */
 
-  /* MCU Configuration----------------------------------------------------------*/
+	/* MCU Configuration----------------------------------------------------------*/
 
-  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-  HAL_Init();
+	/* Reset of all peripherals, Initializes the Flash interface and the Systick. */
+	HAL_Init();
 
-  /* Configure the system clock */
-  SystemClock_Config();
+	/* Configure the system clock */
+	SystemClock_Config();
 
-  /* Initialize all configured peripherals */
-  MX_GPIO_Init();
-  MX_DMA_Init();
-  MX_ADC1_Init();
-  MX_SPI1_Init();
-  MX_USB_DEVICE_Init();
-  MX_TIM4_Init();
+	/* Initialize all configured peripherals */
+	MX_GPIO_Init();
+	MX_DMA_Init();
+	MX_ADC1_Init();
+	MX_SPI1_Init();
+	MX_USB_DEVICE_Init();
+	MX_TIM4_Init();
 
-  /* USER CODE BEGIN 2 */
-  /* Unlock the Flash Program Erase controller */
-  HAL_FLASH_Unlock();
+	/* EEPROM Init */
+	EE_Init();
 
-  /* EEPROM Init */
-  EE_Init();
+	/* Read shifter XY values */
+	EE_ReadVariable(VirtAddVarTab[0], &x_low_th);
+	EE_ReadVariable(VirtAddVarTab[1], &x_high_th);
+	EE_ReadVariable(VirtAddVarTab[2], &y_low_th);
+	EE_ReadVariable(VirtAddVarTab[3], &y_high_th);
 
-  EE_ReadVariable(VirtAddVarTab[0], &x_low_th);
-  EE_ReadVariable(VirtAddVarTab[1], &x_high_th);
-  EE_ReadVariable(VirtAddVarTab[2], &y_low_th);
-  EE_ReadVariable(VirtAddVarTab[3], &y_high_th);
+	report.gears = 0;
+	HAL_ADC_Start_DMA(&hadc1, (uint32_t*)axis, 5);
+	/* USER CODE END 2 */
 
-  /* Lock the Flash Program Erase controller */
-  HAL_FLASH_Lock();
+	/* Infinite loop */
+	/* USER CODE BEGIN WHILE */
+	while (1) {
+		/* USER CODE BEGIN 3 */
+		HAL_GPIO_WritePin(SPI_nCS_GPIO_Port, SPI_nCS_Pin, GPIO_PIN_SET);
 
-  report.gears = 0;
-  HAL_ADC_Start_DMA(&hadc1, (uint16_t*)axis, 5);
-  /* USER CODE END 2 */
+		HAL_TIM_Base_Start_IT(&htim4);
+		while (!u100ticks) /* do nothing for 100 us */;
+		HAL_TIM_Base_Stop_IT(&htim4);
+		u100ticks = 0;
 
-  /* Infinite loop */
-  /* USER CODE BEGIN WHILE */
-  while (1)
-  {
-	  /* USER CODE BEGIN 3 */
-	  HAL_GPIO_WritePin(SPI_nCS_GPIO_Port, SPI_nCS_Pin, GPIO_PIN_SET);
+		HAL_StatusTypeDef status =
+		    HAL_SPI_Receive(&hspi1, rx_buffer, sizeof(rx_buffer), 3000);
 
-	  HAL_TIM_Base_Start_IT(&htim4);
-	  while (!u100ticks) /* do nothing for 100 us */;
-	  HAL_TIM_Base_Stop_IT(&htim4);
-	  u100ticks = 0;
+		switch (status) {
+		case HAL_OK:
+			report.buttons = 0x00;
+			report.d_pad = 0x00;
 
-	  HAL_StatusTypeDef status =
-			  HAL_SPI_Receive(&hspi1, rx_buffer, sizeof(rx_buffer), 3000);
+			if (rx_buffer[0] != 0xff) { // if all bits of rx_buffer[0] is 1 assume shifter is disconnected
+				report.buttons = (rx_buffer[1] & 0xf0) | (rx_buffer[0] & 0xf);
+				report.d_pad = (rx_buffer[1] & 0x0f);
 
-	  switch(status) {
-	      case HAL_OK:
-	    	  report.buttons = 0x00;
-	    	  report.d_pad = 0x00;
-
-	    	  if ((rx_buffer[0] & 0xff) != 0xff) { // if all bits of rx_buffer[0] is 1 assume shifter is disconnected
-
-				  if (rx_buffer[0] & 4)   report.buttons |= 1; else report.buttons &= ~1;
-				  if (rx_buffer[0] & 1)   report.buttons |= (1 << 1); else report.buttons &= ~(1 << 1);
-				  if (rx_buffer[0] & 2)   report.buttons |= (1 << 2); else report.buttons &= ~(1 << 2);
-				  if (rx_buffer[0] & 8)   report.buttons |= (1 << 3); else report.buttons &= ~(1 << 3);
-
-				  if (rx_buffer[1] & 1)   report.d_pad |= 1; else report.d_pad &= ~1;
-				  if (rx_buffer[1] & 2)   report.d_pad |= (1 << 1); else report.d_pad &= ~(1 << 1);
-				  if (rx_buffer[1] & 4)   report.d_pad |= (1 << 2); else report.d_pad &= ~(1 << 2);
-				  if (rx_buffer[1] & 8)   report.d_pad |= (1 << 3); else report.d_pad &= ~(1 << 3);
-
-				  if (rx_buffer[1] & 32)  report.buttons |= (1 << 4); else report.buttons &= ~(1 << 4);
-				  if (rx_buffer[1] & 128) report.buttons |= (1 << 5); else report.buttons &= ~(1 << 5);
-				  if (rx_buffer[1] & 64)  report.buttons |= (1 << 6); else report.buttons &= ~(1 << 6);
-				  if (rx_buffer[1] & 16)  report.buttons |= (1 << 7); else report.buttons &= ~(1 << 7);
-
-				  if (report.buttons == 6 && report.d_pad == 1) {
-					  mute_xy = 1;
-				  } else if (report.buttons == 6 && report.d_pad == 2) {
-					  mute_xy = 0;
-				  }
-	    	  }
-	    	  break;
-
-		  case HAL_TIMEOUT:
-		  case HAL_BUSY:
-		  case HAL_ERROR:
-				Error_Handler();
-		  default:
-				report.buttons = 0xff;
-				break;
-	  }
-
-	  HAL_GPIO_WritePin(SPI_nCS_GPIO_Port, SPI_nCS_Pin, GPIO_PIN_RESET);
-  	  report.id = 0x01;
-
-  	  x_axis = ((X_AXIS << 2) + x_axis * 96) / 100;
-      y_axis = ((Y_AXIS << 2) + y_axis * 96) / 100;
-
-	  if (y_axis < y_low_th) { // stick towards player
-
-			if (x_axis < x_low_th) {
-				if (!report.gears) report.gears = 2; // 2nd gear
-			} else {
-
-				if (x_axis > x_high_th) {
-
-					if (!report.gears) report.gears = (rx_buffer[0] & 64) ? 64 : 32; // 6th gear or reverse
-				} else {
-					if (!report.gears) report.gears = 8; // 4th gear
-				}
+				/*if (report.buttons == 6 && report.d_pad == 1) {
+				  mute_xy = 1;
+				} else if (report.buttons == 6 && report.d_pad == 2) {
+				  mute_xy = 0;
+				}*/
 			}
-		} else {
-			if (y_axis > y_high_th) { // stick opposite to player
+			break;
 
-				if (x_axis < x_low_th) {
-					if (!report.gears) report.gears = 1; // 1st gear
-				} else {
-					if (x_axis > x_high_th) {
-
-						if (!report.gears) report.gears = 16; // 5th gear
-					} else {
-						if (!report.gears) report.gears = 4; // 3rd gear
-					}
-				}
-			} else {
-				report.gears = 0; // neutral
-			}
+		case HAL_TIMEOUT:
+		case HAL_BUSY:
+		case HAL_ERROR:
+			Error_Handler();
+		default:
+			break;
 		}
 
-	    if (!mute_xy) {
-	        report.axis[0] = x_axis;
-	        report.axis[1] = y_axis;
-	    } else {
-	        report.axis[0] = 2048;
-	        report.axis[1] = 2048;
-	    }
+		HAL_GPIO_WritePin(SPI_nCS_GPIO_Port, SPI_nCS_Pin, GPIO_PIN_RESET);
+		report.id = 0x01;
 
-	  do {
+		x_axis = ((X_AXIS << 2) + x_axis * 96) / 100;
+		y_axis = ((Y_AXIS << 2) + y_axis * 96) / 100;
 
-		  HAL_TIM_Base_Start_IT(&htim4);
-		  while (!u100ticks) /* do nothing for 100 us */;
+		report.gears = 0;
+		if (x_axis < x_low_th) {              // Shifter on the left?
+			if (y_axis > y_high_th) report.gears = 1;   // 1st gear
+			if (y_axis < y_low_th)  report.gears = 2;   // 2nd gear
+		} else if (x_axis > x_high_th) {       // Shifter on the right?
+			if (y_axis > y_high_th) report.gears = 16;   // 5th gear
+			if (y_axis < y_low_th)  report.gears = (rx_buffer[0] & 64) ? 64 : 32;
+		} else {                                 // Shifter is in the middle
+			if (y_axis > y_high_th) report.gears = 4;   // 3rd gear
+			if (y_axis < y_low_th) report.gears = 8;   // 4th gear
+		}
 
-		  HAL_TIM_Base_Stop_IT(&htim4);
-		  u100ticks = 0;
+		/*if (!mute_xy) {
+		    report.axis[0] = x_axis;
+		    report.axis[1] = y_axis;
+		} else {
+		    report.axis[0] = 2048;
+		    report.axis[1] = 2048;
+		}*/
 
-	  } while (hUsbDeviceFS.pClassData
-			  && ((USBD_HID_HandleTypeDef *)hUsbDeviceFS.pClassData)->state != HID_IDLE);
+		do {
 
-      if (!report2send) {
-		  USBD_HID_SendReport(&hUsbDeviceFS, (uint8_t *)&report, sizeof(report));
-	  } else {
+			HAL_TIM_Base_Start_IT(&htim4);
+			while (!u100ticks) /* do nothing for 100 us */;
 
-		  uint8_t buf[11];
+			HAL_TIM_Base_Stop_IT(&htim4);
+			u100ticks = 0;
 
-		  mute_xy = 0;
+		} while (hUsbDeviceFS.pClassData
+		         && ((USBD_HID_HandleTypeDef *)hUsbDeviceFS.pClassData)->state != HID_IDLE);
 
-		  buf[0]  = 0x03;
-		  buf[1]  = 0x01;
-		  buf[3]  = x_low_th & 0xff;
-		  buf[4]  = x_low_th >> 8;
-		  buf[5]  = x_high_th & 0xff;
-		  buf[6]  = x_high_th >> 8;
-		  buf[7]  = y_low_th & 0xff;
-		  buf[8]  = y_low_th >> 8;
-		  buf[9]  = y_high_th & 0xff;
-		  buf[10] = y_high_th >> 8;
+		if (!report2send) {
+			USBD_HID_SendReport(&hUsbDeviceFS, (uint8_t *)&report, sizeof(report));
+		} else {
 
-		  if (report2send == 2) {
+			uint8_t buf[11];
 
-			  /* Unlock the Flash Program Erase controller */
-			  HAL_FLASH_Unlock();
+			mute_xy = 0;
 
-			  EE_WriteVariable(VirtAddVarTab[0], x_low_th);
-			  EE_WriteVariable(VirtAddVarTab[1], x_high_th);
-			  EE_WriteVariable(VirtAddVarTab[2], y_low_th);
-			  EE_WriteVariable(VirtAddVarTab[3], y_high_th);
+			buf[0]  = 0x03;
+			buf[1]  = 0x01;
+			buf[3]  = x_low_th & 0xff;
+			buf[4]  = x_low_th >> 8;
+			buf[5]  = x_high_th & 0xff;
+			buf[6]  = x_high_th >> 8;
+			buf[7]  = y_low_th & 0xff;
+			buf[8]  = y_low_th >> 8;
+			buf[9]  = y_high_th & 0xff;
+			buf[10] = y_high_th >> 8;
 
-			  /* Lock the Flash Program Erase controller */
-			  HAL_FLASH_Lock();
+			if (report2send == 2) {
 
-			  HAL_Delay(10);
+				/* Unlock the Flash Program Erase controller */
+				HAL_FLASH_Unlock();
 
-		  } else {
-			  HAL_Delay(50); // wait SP_Profiler to read all previous packets
-		  }
+				EE_WriteVariable(VirtAddVarTab[0], x_low_th);
+				EE_WriteVariable(VirtAddVarTab[1], x_high_th);
+				EE_WriteVariable(VirtAddVarTab[2], y_low_th);
+				EE_WriteVariable(VirtAddVarTab[3], y_high_th);
 
-		  if (USBD_HID_SendReport(&hUsbDeviceFS, buf, sizeof(buf)) == USBD_OK) {
-			  report2send = 0;
-		  }
-	  }
-	  /* USER CODE END 3 */
-  }
+				/* Lock the Flash Program Erase controller */
+				HAL_FLASH_Lock();
 
-  /* USER CODE END WHILE */
+				HAL_Delay(10);
+
+			} else {
+				HAL_Delay(50); // wait SP_Profiler to read all previous packets
+			}
+
+			if (USBD_HID_SendReport(&hUsbDeviceFS, buf, sizeof(buf)) == USBD_OK) {
+				report2send = 0;
+			}
+		}
+		/* USER CODE END 3 */
+	}
+
+	/* USER CODE END WHILE */
 }
 
 /** System Clock Configuration
 */
-void SystemClock_Config(void)
-{
+void SystemClock_Config(void) {
 
-  RCC_OscInitTypeDef RCC_OscInitStruct;
-  RCC_ClkInitTypeDef RCC_ClkInitStruct;
-  RCC_PeriphCLKInitTypeDef PeriphClkInit;
+	RCC_OscInitTypeDef RCC_OscInitStruct;
+	RCC_ClkInitTypeDef RCC_ClkInitStruct;
+	RCC_PeriphCLKInitTypeDef PeriphClkInit;
 
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
-  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
-  RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
-  RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
-  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
-  {
-    Error_Handler();
-  }
+	RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+	RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+	RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
+	RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+	RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+	RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
+	if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) {
+		Error_Handler();
+	}
 
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
-                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
-  {
-    Error_Handler();
-  }
+	RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
+	                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
+	RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+	RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+	RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
+	RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+	if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK) {
+		Error_Handler();
+	}
 
-  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_ADC|RCC_PERIPHCLK_USB;
-  PeriphClkInit.AdcClockSelection = RCC_ADCPCLK2_DIV6;
-  PeriphClkInit.UsbClockSelection = RCC_USBCLKSOURCE_PLL_DIV1_5;
-  if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
-  {
-    Error_Handler();
-  }
+	PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_ADC|RCC_PERIPHCLK_USB;
+	PeriphClkInit.AdcClockSelection = RCC_ADCPCLK2_DIV6;
+	PeriphClkInit.UsbClockSelection = RCC_USBCLKSOURCE_PLL_DIV1_5;
+	if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK) {
+		Error_Handler();
+	}
 
-  HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq()/1000);
+	HAL_SYSTICK_Config(HAL_RCC_GetHCLKFreq()/1000);
 
-  HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
+	HAL_SYSTICK_CLKSourceConfig(SYSTICK_CLKSOURCE_HCLK);
 
-  /* SysTick_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
+	/* SysTick_IRQn interrupt configuration */
+	HAL_NVIC_SetPriority(SysTick_IRQn, 0, 0);
 }
 
 /* ADC1 init function */
-static void MX_ADC1_Init(void)
-{
+static void MX_ADC1_Init(void) {
 
-  ADC_ChannelConfTypeDef sConfig;
+	ADC_ChannelConfTypeDef sConfig;
 
-    /**Common config
-    */
-  hadc1.Instance = ADC1;
-  hadc1.Init.ScanConvMode = ADC_SCAN_ENABLE;
-  hadc1.Init.ContinuousConvMode = ENABLE;
-  hadc1.Init.DiscontinuousConvMode = DISABLE;
-  hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
-  hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
-  hadc1.Init.NbrOfConversion = 5;
-  if (HAL_ADC_Init(&hadc1) != HAL_OK)
-  {
-    Error_Handler();
-  }
+	/**Common config
+	*/
+	hadc1.Instance = ADC1;
+	hadc1.Init.ScanConvMode = ADC_SCAN_ENABLE;
+	hadc1.Init.ContinuousConvMode = ENABLE;
+	hadc1.Init.DiscontinuousConvMode = DISABLE;
+	hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+	hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+	hadc1.Init.NbrOfConversion = 5;
+	if (HAL_ADC_Init(&hadc1) != HAL_OK) {
+		Error_Handler();
+	}
 
-  /**Configure Regular Channel
-    */
-  sConfig.Channel = ADC_CHANNEL_0;
-  sConfig.Rank = 1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_7CYCLES_5;
-  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
+	/**Configure Regular Channel
+	  */
+	sConfig.Channel = ADC_CHANNEL_0;
+	sConfig.Rank = 1;
+	sConfig.SamplingTime = ADC_SAMPLETIME_239CYCLES_5;
+	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK) {
+		Error_Handler();
+	}
 
-  sConfig.Channel = ADC_CHANNEL_1;
-  sConfig.Rank = 2;
-  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
+	sConfig.Channel = ADC_CHANNEL_1;
+	sConfig.Rank = 2;
+	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK) {
+		Error_Handler();
+	}
 
-  sConfig.Channel = ADC_CHANNEL_2;
-  sConfig.Rank = 3;
-  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
+	sConfig.Channel = ADC_CHANNEL_2;
+	sConfig.Rank = 3;
+	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK) {
+		Error_Handler();
+	}
 
-  sConfig.Channel = ADC_CHANNEL_3;
-  sConfig.Rank = 4;
-  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
+	sConfig.Channel = ADC_CHANNEL_3;
+	sConfig.Rank = 4;
+	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK) {
+		Error_Handler();
+	}
 
-  sConfig.Channel = ADC_CHANNEL_4;
-  sConfig.Rank = 5;
-  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
+	sConfig.Channel = ADC_CHANNEL_4;
+	sConfig.Rank = 5;
+	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK) {
+		Error_Handler();
+	}
 }
 
 /* TIM4 init function */
-static void MX_TIM4_Init(void)
-{
+static void MX_TIM4_Init(void) {
 
-  htim4.Instance = TIM4;
-  htim4.Init.Prescaler = 72;
-  htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim4.Init.Period = 100; /* generate IRQ 72 MHz / 72 / 100 = 10,000 times per second */
-  htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  if (HAL_TIM_Base_Init(&htim4) != HAL_OK)
-  {
-    Error_Handler();
-  }
+	htim4.Instance = TIM4;
+	htim4.Init.Prescaler = 72;
+	htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
+	htim4.Init.Period = 100; /* generate IRQ 72 MHz / 72 / 100 = 10,000 times per second */
+	htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+	if (HAL_TIM_Base_Init(&htim4) != HAL_OK) {
+		Error_Handler();
+	}
 
 }
 
 /**
   * Enable DMA controller clock
   */
-static void MX_DMA_Init(void)
-{
-  /* DMA controller clock enable */
-  __HAL_RCC_DMA1_CLK_ENABLE();
+static void MX_DMA_Init(void) {
+	/* DMA controller clock enable */
+	__HAL_RCC_DMA1_CLK_ENABLE();
 
-  /* DMA interrupt init */
-  /* DMA1_Channel1_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
+	/* DMA interrupt init */
+	/* DMA1_Channel1_IRQn interrupt configuration */
+	HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
+	HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
 
 }
 
 // ADC DMA interrupt handler
-void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc){
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
 
-    report.axis[2] = ((T_AXIS << 1) + report.axis[2] * 98) / 100;
-    report.axis[3] = ((B_AXIS << 1) + report.axis[3] * 98) / 100;
-    report.axis[4] = ((C_AXIS << 1) + report.axis[4] * 98) / 100;
+	report.axis[2] = ((T_AXIS << 1) + report.axis[2] * 98) / 100;
+	report.axis[3] = ((B_AXIS << 1) + report.axis[3] * 98) / 100;
+	report.axis[4] = ((C_AXIS << 1) + report.axis[4] * 98) / 100;
 }
 
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
-{
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 	if (htim->Instance == TIM4) {
 		u100ticks++;
 	}
 }
 
 /* SPI1 init function */
-static void MX_SPI1_Init(void)
-{
+static void MX_SPI1_Init(void) {
 
-  hspi1.Instance = SPI1;
-  hspi1.Init.Mode = SPI_MODE_MASTER;
-  hspi1.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
-  hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
-  hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
-  hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_32;
-  hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
-  hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
-  hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
-  hspi1.Init.CRCPolynomial = 10;
-  if (HAL_SPI_Init(&hspi1) != HAL_OK)
-  {
-    Error_Handler();
-  }
+	hspi1.Instance = SPI1;
+	hspi1.Init.Mode = SPI_MODE_MASTER;
+	hspi1.Init.Direction = SPI_DIRECTION_2LINES;
+	hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
+	hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
+	hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
+	hspi1.Init.NSS = SPI_NSS_SOFT;
+	hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_32;
+	hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
+	hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
+	hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+	hspi1.Init.CRCPolynomial = 10;
+	if (HAL_SPI_Init(&hspi1) != HAL_OK) {
+		Error_Handler();
+	}
 
 }
 
@@ -516,34 +458,33 @@ static void MX_SPI1_Init(void)
         * EVENT_OUT
         * EXTI
 */
-static void MX_GPIO_Init(void)
-{
+static void MX_GPIO_Init(void) {
 
-  GPIO_InitTypeDef GPIO_InitStruct;
+	GPIO_InitTypeDef GPIO_InitStruct;
 
-  /* GPIO Ports Clock Enable */
-  __HAL_RCC_GPIOC_CLK_ENABLE();
-  __HAL_RCC_GPIOD_CLK_ENABLE();
-  __HAL_RCC_GPIOA_CLK_ENABLE();
-  __HAL_RCC_GPIOB_CLK_ENABLE();
+	/* GPIO Ports Clock Enable */
+	__HAL_RCC_GPIOC_CLK_ENABLE();
+	__HAL_RCC_GPIOD_CLK_ENABLE();
+	__HAL_RCC_GPIOA_CLK_ENABLE();
+	__HAL_RCC_GPIOB_CLK_ENABLE();
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+	/*Configure GPIO pin Output Level */
+	HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(SPI_nCS_GPIO_Port, SPI_nCS_Pin, GPIO_PIN_RESET);
+	/*Configure GPIO pin Output Level */
+	HAL_GPIO_WritePin(SPI_nCS_GPIO_Port, SPI_nCS_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin : PC13 */
-  GPIO_InitStruct.Pin = GPIO_PIN_13;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+	/*Configure GPIO pin : PC13 */
+	GPIO_InitStruct.Pin = GPIO_PIN_13;
+	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+	HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : SPI_nCS_Pin */
-  GPIO_InitStruct.Pin = SPI_nCS_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-  HAL_GPIO_Init(SPI_nCS_GPIO_Port, &GPIO_InitStruct);
+	/*Configure GPIO pin : SPI_nCS_Pin */
+	GPIO_InitStruct.Pin = SPI_nCS_Pin;
+	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+	HAL_GPIO_Init(SPI_nCS_GPIO_Port, &GPIO_InitStruct);
 
 }
 
@@ -556,16 +497,14 @@ static void MX_GPIO_Init(void)
   * @param  None
   * @retval None
   */
-void Error_Handler(void)
-{
-  /* USER CODE BEGIN Error_Handler */
-  /* User can add his own implementation to report the HAL error return state */
-  while(1)
-  {
-	  HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
-	  HAL_Delay(250);
-  }
-  /* USER CODE END Error_Handler */
+void Error_Handler(void) {
+	/* USER CODE BEGIN Error_Handler */
+	/* User can add his own implementation to report the HAL error return state */
+	while(1) {
+		HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+		HAL_Delay(250);
+	}
+	/* USER CODE END Error_Handler */
 }
 
 #ifdef USE_FULL_ASSERT
@@ -577,12 +516,11 @@ void Error_Handler(void)
    * @param line: assert_param error line source number
    * @retval None
    */
-void assert_failed(uint8_t* file, uint32_t line)
-{
-  /* USER CODE BEGIN 6 */
-  /* User can add his own implementation to report the file name and line number,
-    ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
-  /* USER CODE END 6 */
+void assert_failed(uint8_t* file, uint32_t line) {
+	/* USER CODE BEGIN 6 */
+	/* User can add his own implementation to report the file name and line number,
+	  ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+	/* USER CODE END 6 */
 
 }
 
